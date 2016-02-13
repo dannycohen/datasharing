@@ -1,0 +1,127 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Danny Cohen"
+date: "Friday, February 12, 2016"
+output: html_document
+---
+
+## Summary 
+
+I will be using the Random Forest ML algorithm in order to predict the ```classe``` variable on the testing data. 
+Before performing the prediction, I will first load and clean the data in various ways (as described below, per action) and I will also split the training data into two sub-datasets (named ```train``` and ```validation```). The goal of this split is to validate the prediction on the ```classe``` variable available in the training dataset's ```validation``` subset, prior to performing the prediction on the ```test```  dataset itself.
+
+## Load & clean the data
+
+#### Load required libraries
+
+```{r, warning=FALSE}
+rm(list=ls()) # clean up environment variables
+library(data.table)
+library(caret)
+library(randomForest)
+```
+
+#### Load data
+
+```{r}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# load & remove missing values
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+```
+
+#### Identify and remove Near Zero Variables
+```{r}
+dataNZV <- nearZeroVar(training, saveMetrics=TRUE)
+training <- training[, !dataNZV$nzv]
+dim(training)
+```
+
+#### Remove variables with more than 50% missing values 
+```{r}
+toberem <- sapply(colnames(training), function(x) if(sum(is.na(training[, x])) > 0.50*nrow(training))  
+    { return(TRUE) }
+    else {return(FALSE) }
+    )
+training <- training[, !toberem]
+dim(training)
+```
+
+#### Remove automatically generated column data 
+
+Columns related to data acquisition (like id, timestamp, names etc.) are removed since they do not contribute to ML algorithms. 
+
+```{r}
+training <- training[, -(1:6)]
+```
+
+
+## Cross Validation
+
+#### Split the training dataset into train and validate datasets
+
+This split will be used to visibly validate the accuracy of the random forest algorithm, prior to predicting it on the test dataset.
+
+```{r}
+inTrain <- createDataPartition(y=training$classe, p=0.8, list=FALSE)
+train <- training[inTrain,]
+validation <- training[-inTrain,]
+dim(train)
+dim(validation)
+```
+
+#### Configure the ```caret``` ```train``` method to perform cross validation 5 times
+
+```{r}
+trainer <- trainControl(method = "cv", number = 5, preProcOptions="pca", verboseIter=FALSE, allowParallel=TRUE)
+```
+
+## Train Random Forest algorithm
+
+I decided to use the Random Forest algorithm after playing around with the various algorithms (see ```names(getModelInfo())```). 
+I did not perform an exhaustive evaluation / comparison of the various algorithms (that is not required by the assignment) but it is my estimation that Random Forest is the most effective for this dataset.
+
+```{r, warning=FALSE}
+rf <- train(classe ~ ., data = train, method = "rf", trControl= trainer)
+```
+
+#### Accuracy of Random forest algorithm on the ```train``` dataset
+
+```{r}
+model <- "Random forest"
+Accuracy <- max(rf$results$Accuracy)
+Kappa <- max(rf$results$Kappa)
+performance <- cbind(model,Accuracy,Kappa)
+performance
+```
+
+### Validated prediction on validation dataset
+
+```{r}
+validation_classe <- validation$classe
+validation <- validation[ , !names(validation) %in% c("classe")] # remove classe column
+validated_prediction <- predict(rf, validation)
+validation$predicted_classe <- validated_prediction
+validation$classe <- validation_classe
+validation$classe_sames_as_predicted <- with(validation, validation$classe == validation$predicted_classe)
+```
+
+Lets see how many predictions were correct (i.e. ```TRUE```) vs. wrong (i.e. ```FALSE```):
+
+```{r}
+table(validation$classe_sames_as_predicted)
+```
+
+## Predict on testing dataset
+```{r}
+prediction <- predict(rf, testing)
+testing$predicted_classe <- prediction
+```
+
+#### Write testing prediction output to file
+
+```{r}
+filename <- "test_prediction.txt"
+write.table(testing,file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+```
